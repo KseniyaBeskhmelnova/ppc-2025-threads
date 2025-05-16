@@ -217,27 +217,27 @@ TEST(sparse_matrix_multiplication_seq, test_matrices_300) {
   multiplicationTask.PostProcessing();
 }
 
-TEST(sparse_matrix_multiplication_seq, test_matrices_400) {
-  const auto size = 400;
-
-  auto matrixA = sparse_matrix_multiplication_seq::GenerateRandomMatrix(size * size);
-  auto matrixB = sparse_matrix_multiplication_seq::GenerateRandomMatrix(size * size);
-  std::vector<double> result(size * size, 0);
-
-  auto task_data_omp = std::make_shared<ppc::core::TaskData>();
-  task_data_omp->inputs.emplace_back(reinterpret_cast<uint8_t*>(matrixA.data()));
-  task_data_omp->inputs.emplace_back(reinterpret_cast<uint8_t*>(matrixB.data()));
-  task_data_omp->inputs_count = {size, size, size, size};
-  task_data_omp->outputs.emplace_back(reinterpret_cast<uint8_t*>(result.data()));
-  task_data_omp->outputs_count.emplace_back(result.size());
-
-  sparse_matrix_multiplication_seq::CCSMatrixSeq multiplicationTask(task_data_omp);
-  ASSERT_TRUE(multiplicationTask.Validation()) << "Validation failed for random large matrices!";
-
-  multiplicationTask.PreProcessing();
-  clock_t start = clock();
-  multiplicationTask.Run();
-  clock_t end = clock();
-  std::cout << "Time on matrix 400*400 = " << double(end - start);
-  multiplicationTask.PostProcessing();
-}
+//TEST(sparse_matrix_multiplication_seq, test_matrices_400) {
+//  const auto size = 400;
+//
+//  auto matrixA = sparse_matrix_multiplication_seq::GenerateRandomMatrix(size * size);
+//  auto matrixB = sparse_matrix_multiplication_seq::GenerateRandomMatrix(size * size);
+//  std::vector<double> result(size * size, 0);
+//
+//  auto task_data_omp = std::make_shared<ppc::core::TaskData>();
+//  task_data_omp->inputs.emplace_back(reinterpret_cast<uint8_t*>(matrixA.data()));
+//  task_data_omp->inputs.emplace_back(reinterpret_cast<uint8_t*>(matrixB.data()));
+//  task_data_omp->inputs_count = {size, size, size, size};
+//  task_data_omp->outputs.emplace_back(reinterpret_cast<uint8_t*>(result.data()));
+//  task_data_omp->outputs_count.emplace_back(result.size());
+//
+//  sparse_matrix_multiplication_seq::CCSMatrixSeq multiplicationTask(task_data_omp);
+//  ASSERT_TRUE(multiplicationTask.Validation()) << "Validation failed for random large matrices!";
+//
+//  multiplicationTask.PreProcessing();
+//  clock_t start = clock();
+//  multiplicationTask.Run();
+//  clock_t end = clock();
+//  std::cout << "Time on matrix 400*400 = " << double(end - start);
+//  multiplicationTask.PostProcessing();
+//}

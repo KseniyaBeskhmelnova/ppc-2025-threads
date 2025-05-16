@@ -91,8 +91,6 @@ int SparseMatrix::CountElements(int index, const std::vector<int>& elements_coun
   return elements_count[index] - elements_count[index - 1];
 }
 
-int elems = 0;
-
 SparseMatrix SparseMatrix::operator*(const SparseMatrix& other) const {
   std::vector<double> result_values;
   std::vector<int> result_rows;
@@ -131,7 +129,6 @@ SparseMatrix SparseMatrix::operator*(const SparseMatrix& other) const {
               local_values.push_back(sum);
               local_rows.push_back(row);
               local_count++;
-              elems++;
             }
           }
         }
@@ -170,8 +167,6 @@ bool CCSMatrixTBB::PreProcessingImpl() {
   std::vector<double> s_matrix(reinterpret_cast<double*>(task_data->inputs[1]),
                                reinterpret_cast<double*>(task_data->inputs[1]) + s_rows * s_cols);
   second_matrix_ = MatrixToSparse(s_rows, s_cols, s_matrix);
-  std::cout << std::endl << "A: " << first_matrix_.GetValues().size();
-  std::cout << std::endl << "B: " << second_matrix_.GetValues().size();
   return true;
 }
 
@@ -182,11 +177,13 @@ bool CCSMatrixTBB::ValidationImpl() {
 
 bool CCSMatrixTBB::RunImpl() {
   result_matrix_ = first_matrix_ * second_matrix_;
+  std::cout << "First matrix non-zeros: " << first_matrix_.GetValues().size() << std::endl;
+  std::cout << "Second matrix non-zeros: " << second_matrix_.GetValues().size() << std::endl;
+  std::cout << "Result matrix non-zeros: " << result_matrix_.GetValues().size() << std::endl;
   return true;
 }
 
 bool CCSMatrixTBB::PostProcessingImpl() {
-  std::cout << std::endl << "res: " << elems;
   auto result = FromSparseMatrix(result_matrix_);
   std::copy(result.begin(), result.end(), reinterpret_cast<double*>(task_data->outputs[0]));
   return true;

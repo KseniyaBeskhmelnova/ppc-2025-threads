@@ -1,9 +1,6 @@
 #include "stl/sparse_matrix/include/sparse_matrix_stl.hpp"
 
-#include <algorithm>
-#include <atomic>
 #include <execution>
-#include <future>
 #include <random>
 
 namespace sparse_matrix_multiplication_stl {
@@ -90,7 +87,35 @@ int SparseMatrix::CountElements(int index, const std::vector<int>& elements_coun
   return elements_count[index] - elements_count[index - 1];
 }
 
-int elems = 0;
+double SparseMatrix::CalculateSum(const SparseMatrix& first_matrix, const SparseMatrix& second_matrix,
+                                  const std::vector<int>& first_sums, const std::vector<int>& second_sums,
+                                  int i, int j) {
+  int first_elements_count = CountElements(j, first_sums);
+  int second_elements_count = CountElements(i, second_sums);
+  int first_start_index = j != 0 ? first_sums[j - 1] : 0;
+  int second_start_index = i != 0 ? second_sums[i - 1] : 0;
+  double sum = 0.0;
+  for (int k = 0; k < first_elements_count; k++)
+    for (int r = 0; r < second_elements_count; r++)
+      if (first_matrix.GetRowIndices()[first_start_index + k] == second_matrix.GetRowIndices()[second_start_index + r])
+        sum += first_matrix.GetValues()[k + first_start_index] * second_matrix.GetValues()[r + second_start_index];
+  return sum;
+}
+
+std::vector<std::pair<int, int>> SparseMatrix::StartIndexes(size_t vector_size) {
+  int n = static_cast<int>(vector_size) % threads_count;
+  int count = static_cast<int>(vector_size) / threads_count;
+  std::vector<std::pair<int, int>> threads_start_indexes(threads_count);
+  for (int i = 0; i < static_cast<int>(threads_start_indexes.size()); ++i) {
+    if (i == 0)
+      threads_start_indexes[i] = {0, count};
+    else
+      threads_start_indexes[i] = {threads_start_indexes[i - 1].second, threads_start_indexes[i - 1].second + count};
+    if (i < n)
+      threads_start_indexes[i].second++;
+  }
+  return threads_start_indexes;
+}
 
 SparseMatrix SparseMatrix::operator*(const SparseMatrix& other) const {
   std::vector<double> result_values;
@@ -101,54 +126,39 @@ SparseMatrix SparseMatrix::operator*(const SparseMatrix& other) const {
   const auto& first_sums = transposed.GetCumulativeElements();
   const auto& second_sums = other.GetCumulativeElements();
 
-  std::vector<std::vector<double>> local_values_vec(other.GetColumnCount());
-  std::vector<std::vector<int>> local_rows_vec(other.GetColumnCount());
-  std::vector<int> local_counts(other.GetColumnCount(), 0);
-
-  std::mutex mtx;
-
-  std::vector<int> col_indices(other.GetColumnCount());
-  std::iota(col_indices.begin(), col_indices.end(), 0);
-
-  std::for_each(std::execution::par, col_indices.begin(), col_indices.end(), [&](int col) {
-    std::vector<double>& local_values = local_values_vec[col];
-    std::vector<int>& local_rows = local_rows_vec[col];
-    int& local_count = local_counts[col];
-
-    for (int row = 0; row < static_cast<int>(first_sums.size()); row++) {
-      double sum = 0.0;
-      int first_count = CountElements(row, first_sums);
-      int second_count = CountElements(col, second_sums);
-
-      int first_start = row == 0 ? 0 : first_sums[row - 1];
-      int second_start = col == 0 ? 0 : second_sums[col - 1];
-
-      for (int i = 0; i < first_count; i++) {
-        for (int j = 0; j < second_count; j++) {
-          if (transposed.GetRowIndices()[first_start + i] == other.GetRowIndices()[second_start + j])
-            sum += transposed.GetValues()[first_start + i] * other.GetValues()[second_start + j];
+  std::vector<std::thread> threads(threads_count);
+  std::vector<MatrixComponents> threads_data(threads_count);
+  auto function = [&](size_t start, size_t end, size_t index) {
+    MatrixComponents component;
+    component.elementsSum.resize(end - start);
+    for (size_t i = start; i < end; i++) {
+      for (size_t j = 0; j < first_sums.size(); j++) {
+        double sum = CalculateSum(transposed, other, first_sums, second_sums, static_cast<int>(i), static_cast<int>(j));
+        if (sum > kThreshold) {
+          component.values.emplace_back(sum);
+          component.rows.emplace_back(j);
+          component.elementsSum[i - start]++;
         }
       }
-
-      if (sum > kThreshold) {
-        local_values.push_back(sum);
-        local_rows.push_back(row);
-        local_count++;
-        elems++;
-      }
     }
-  });
-
-  for (int col = 0; col < other.GetColumnCount(); col++) {
-    std::lock_guard<std::mutex> lock(mtx);
-    result_values.insert(result_values.end(), local_values_vec[col].begin(), local_values_vec[col].end());
-    result_rows.insert(result_rows.end(), local_rows_vec[col].begin(), local_rows_vec[col].end());
-    result_cumulative[col] = local_counts[col];
+    threads_data[index] = std::move(component);
+  };
+  auto indexes = StartIndexes(second_sums.size());
+  for (size_t i = 0; i < threads_data.size(); i++)
+    threads[i] = std::thread(function, indexes[i].first, indexes[i].second, i);
+  std::ranges::for_each(threads, [&](auto& thread) { thread.join(); });
+  MatrixComponents result;
+  for (auto& data : threads_data) {
+    for (size_t i = 0; i < data.rows.size(); i++) {
+      result.rows.emplace_back(data.rows[i]);
+      result.values.emplace_back(data.values[i]);
+    }
+    for (size_t i = 0; i < data.elementsSum.size(); i++)
+      result.elementsSum.emplace_back(data.elementsSum[i]);
   }
-
-  for (size_t i = 1; i < result_cumulative.size(); i++) result_cumulative[i] += result_cumulative[i - 1];
-
-  return SparseMatrix(other.GetColumnCount(), other.GetColumnCount(), result_values, result_rows, result_cumulative);
+  for (size_t i = 1; i < result.elementsSum.size(); i++)
+    result.elementsSum[i] = result.elementsSum[i] + result.elementsSum[i - 1];
+  return {rows_count_, other.GetColumnCount(), result};
 }
 
 std::vector<double> GenerateRandomMatrix(int dimension) {
@@ -176,8 +186,8 @@ bool CCSMatrixSTL::PreProcessingImpl() {
   std::vector<double> s_matrix(reinterpret_cast<double*>(task_data->inputs[1]),
                                reinterpret_cast<double*>(task_data->inputs[1]) + s_rows * s_cols);
   second_matrix_ = MatrixToSparse(s_rows, s_cols, s_matrix);
-  std::cout << std::endl << "A: " << first_matrix_.GetValues().size();
-  std::cout << std::endl << "B: " << second_matrix_.GetValues().size();
+  std::cout << "First matrix non-zeros: " << first_matrix_.GetValues().size() << std::endl;
+  std::cout << "Second matrix non-zeros: " << second_matrix_.GetValues().size() << std::endl;
   return true;
 }
 
@@ -188,11 +198,11 @@ bool CCSMatrixSTL::ValidationImpl() {
 
 bool CCSMatrixSTL::RunImpl() {
   result_matrix_ = first_matrix_ * second_matrix_;
+  std::cout << "Result matrix non-zeros: " << result_matrix_.GetValues().size() << std::endl;
   return true;
 }
 
 bool CCSMatrixSTL::PostProcessingImpl() {
-  std::cout << std::endl << "res: " << elems;
   auto result = FromSparseMatrix(result_matrix_);
   std::copy(result.begin(), result.end(), reinterpret_cast<double*>(task_data->outputs[0]));
   return true;
